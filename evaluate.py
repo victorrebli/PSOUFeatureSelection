@@ -15,6 +15,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 import warnings
 warnings.filterwarnings("ignore")
 import math
+import itertools
 
 
 class SolutionEvaluatorException(Exception):
@@ -64,19 +65,12 @@ class SolutionEvaluator(object):
             lista = self.drop_features(pop['pop'][i, :])
             if(self.p.n_cols - len(lista)) > 1:
                 
-                if isinstance(x_train, np.ndarray):
-                    #dados_train = x_train.drop(x_train.columns[[lista]], 1)
-                    #dados_train = x_train[:, lista]
-                    dados_train = np.delete(x_train, np.s_[lista], axis=1)   
+                #if isinstance(x_train, np.ndarray):
+                #    dados_train = np.delete(x_train, np.s_[lista], axis=1)   
+
+                dados_train = x_train.drop(x_train.columns[[lista]], 1)
                     
-                if sparse.issparse(x_train):
-                    dados_train = x_train[:, lista]
-                    
-                if dados_train.shape[1] == 0:
-                    print('entrei')
-                    breakpoint()     
                 pred = self.model(dados_train, y_train)    
-                #breakpoint()
                 pop['pop'][i ,tam] = pred['mean_ff']
                 self.totaliter.append(pop['pop'][i, :])
                 if 'mean_cp' in pred.keys():
@@ -105,68 +99,59 @@ class SolutionEvaluator(object):
         return listt
     
     
-    
     def model(self, data, y_train):
         
         module_name = self.estimator.__class__
-        #breakpoint()
         if 'KMeans' in str(module_name):
-            result = self._kmeans(data)
+            result = self._kmeans(data, y_train)
         else:
             SolutionEvaluatorException(f'Clustering method not implement')
             
         return result
 
 
-    def _kmeans(self, x_tr):
+    def _kmeans(self, x_tr, y_tr):
         
         lista_models = []
         
         x_tr = np.array(x_tr)
-        #breakpoint()
         if self.label is None:
 
             for train_index, test_index in self.cvs.split(x_tr):
-            
-            
                 train_x, valid_x = x_tr[train_index], x_tr[test_index]
                 #train_y, valid_y = y_tr[train_index], y_tr[test_index]
-                #print(train_x.shape)
-                try:
-                    self.estimator.fit(train_x)
-                except:
-                    print('Quebrou')
-                    breakpoint()    
+                self.estimator.fit(train_x)
+                   
                 pred_train = self.estimator.predict(train_x)
                 pred_test = self.estimator.predict(valid_x)
                 lista_models.append(self.metric_intra_inter_cluster(valid_x, pred_test))
-            #breakpoint()
+            
             return {'mean_ff': np.mean(lista_models)}
         else:
             lista_fm = []
             lista_cp = []
-            y_tr = self.label
+            y_tr = np.array(y_tr)
+            
             for train_index, test_index in self.cvs.split(y_tr):    
 
                 train_x, valid_x = x_tr[train_index], x_tr[test_index]
                 train_y, valid_y = y_tr[train_index], y_tr[test_index]
+                
                 self.estimator.fit(train_x)
                 pred_train = self.estimator.predict(train_x)
                 pred_test = self.estimator.predict(valid_x)
+
                 lista_models.append(self.metric_intra_inter_cluster(valid_x, pred_test))
+
                 lista_cp.append(self.class_purity(valid_y,pred_test))
                 lista_fm.append(self.FMeasure(valid_y,pred_test))
             return {'mean_ff': np.mean(lista_models),  'mean_fm': np.mean(lista_fm), 'mean_cp': np.mean([y for x in lista_cp for y in x])}
 
-         
-            
-                    
-                    
+                         
     def metric_intra_inter_cluster(self, data, pred):
 
        soma_train_aux_1 = 0
        soma_train_aux_2 = 0
-       #breakpoint()
        ####### JW
        for label in np.unique(pred): 
            sub_data = data[np.where(pred == label)]
@@ -180,9 +165,9 @@ class SolutionEvaluator(object):
        for label in np.unique(pred):
            sub_data = data[np.where(pred == label)]
            media = np.mean(sub_data,axis=0)
-           #breakpoint()
            interm = len(sub_data) / float(len(data)) * np.power(euclidean_distances(media.reshape(1,-1),media_all.reshape(1,-1)), 2)[0][0]
            soma_train_aux_2 += interm
+
        #### CP
        try:
            perfo_clus = soma_train_aux_2 / float(soma_train_aux_1)
@@ -195,9 +180,7 @@ class SolutionEvaluator(object):
        except:
            raise  SolutionEvaluatorException(f'Problem with variables -- self.n_cols:{self.n_cols} - \
                                              data.shape::{data.shape[1]}')   
-
        return (perfo_clus * funfit)
-
 
     def class_purity(self, true_labels, pred_labels):
         unicos = np.unique(pred_labels)
@@ -209,7 +192,7 @@ class SolutionEvaluator(object):
             except:
                 raise SolutionEvaluatorException(f'Problem with variables -- ind:{ind} - unicos:{unicos}')
             try:
-                clus = trua_labels[ind]
+                clus = true_labels[ind]
                 majority = pd.value_counts(clus).keys()[0]
             except:
                 raise SolutionEvaluatorException(f'Problem with variables -- clus:{clus}')
@@ -223,33 +206,62 @@ class SolutionEvaluator(object):
         return fracoes                    
             
     def FMeasure(self, true_labels, pred_labels):
-
-        ran = range(0, len(pred_labels))
-        tt = list(itertools.combinations(ran,2))
-        TP, FN, TN, FP = 0, 0, 0, 0
-        for i in range(0,len(tt)):
-
-            clus1 = pred_labels[tt[i][0]]
-            clus2 = pred_labels[tt[i][1]]
-            clas1 = true_labels[tt[i][0]]
-            clas2 = true_labels[tt[i][1]]
-            if clas1 == clas2:
-                if clus1 == clus2:
-                    TP = TP + 1
-                else:
-                    FN = FN + 1
-            elif clas1 != clas2:
-                if clus1 == clus2:
-                    FP = FP + 1
-                else:
-                    TN = TN + 1
-        precision = TP / float(TP + FP)
-        recal = TP / float(TP + FN)
-        FMeasure = 2 * (precision * recal) / float((precision + recal))                
-        return FMeasure
-
-
         
+        if len(true_labels) <= 10000:
+                ran = range(0, len(pred_labels))
+                
+                tt = itertools.combinations(ran,2)
+                TP, FN, TN, FP = 0, 0, 0, 0
+                for idx, i in enumerate(tt):
+
+                    clus1 = pred_labels[i[0]]
+                    clus2 = pred_labels[i[1]]
+                    clas1 = true_labels[i[0]]
+                    clas2 = true_labels[i[1]]
+                    if clas1 == clas2:
+                        if clus1 == clus2:
+                            TP = TP + 1
+                        else:
+                            FN = FN + 1
+                    elif clas1 != clas2:
+                        if clus1 == clus2:
+                            FP = FP + 1
+                        else:
+                            TN = TN + 1
+                precision = TP / float(TP + FP)
+                recal = TP / float(TP + FN)
+                FMeasure = 2 * (precision * recal) / float((precision + recal)) 
+                return FMeasure 
+        else:
+            qtd = 100
+            list_fm = []
+            for _trial in range(0,qtd):
+                #print(_trial)
+                numbers = np.random.choice(range(0, len(pred_labels)), 1000, replace=False)
+                tt = itertools.combinations(numbers,2)
+                TP, FN, TN, FP = 0, 0, 0, 0
+                for i in tt:
+                    clus1 = pred_labels[i[0]]
+                    clus2 = pred_labels[i[1]]
+                    clas1 = true_labels[i[0]]
+                    clas2 = true_labels[i[1]]
+                    if clas1 == clas2:
+                        if clus1 == clus2:
+                            TP = TP + 1
+                        else:
+                            FN = FN + 1
+                    elif clas1 != clas2:
+                        if clus1 == clus2:
+                            FP = FP + 1
+                        else:
+                            TN = TN + 1
+                precision = TP / float(TP + FP)
+                recal = TP / float(TP + FN)
+                FMeasure = 2 * (precision * recal) / float((precision + recal))        
+                list_fm.append(FMeasure)
+
+            return np.mean(list_fm)    
+    
     def _get_cv(self, y_tr):
         
         cv = check_cv(self.cv, y_tr, classifier=is_classifier(self.estimator))

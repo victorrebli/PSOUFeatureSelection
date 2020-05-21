@@ -13,18 +13,22 @@ from problem import Problem
 from evaluate import SolutionEvaluator
 
 
-logFormatter = logging.Formatter("[%(asctime)s] %(message)s", datefmt='%m/%d %I:%M:%S')
+def log():
+    logFormatter = logging.Formatter("[%(asctime)s] %(message)s", datefmt='%m/%d %I:%M:%S')
+    rootLogger = logging.getLogger()
+    rootLogger.setLevel(logging.DEBUG)
+    
+    if not rootLogger.handlers:
+        fileHandler = logging.FileHandler(datetime.now().strftime('PSO_%d-%m_%H:%M.log'))
+        fileHandler.setFormatter(logFormatter)
+        rootLogger.addHandler(fileHandler)
 
-rootLogger = logging.getLogger()
-rootLogger.setLevel(logging.DEBUG)
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setFormatter(logFormatter)
+        rootLogger.addHandler(consoleHandler)
+    return rootLogger
 
-fileHandler = logging.FileHandler(datetime.now().strftime('pso_%d-%m_%H:%M.log'))
-fileHandler.setFormatter(logFormatter)
-rootLogger.addHandler(fileHandler)
-
-consoleHandler = logging.StreamHandler()
-consoleHandler.setFormatter(logFormatter)
-rootLogger.addHandler(consoleHandler)
+rootLogger  = log()  
 
 def minimize_comparator(individual_solution, global_solution) -> bool:
     return individual_solution < global_solution
@@ -150,18 +154,19 @@ class PSOSelector(object):
                
        def fit(self, X, unused_y = None, **kargs):
            
-           '''if not isinstance(X, np.ndarray):
-               raise PSOException('The "X" parameter must be a array')'''
+           if not isinstance(X, pd.DataFrame):
+               raise PSOException('The "X" parameter must be a data frame')
         
            colunas_full  = X.columns
             
            self._initialize(X)
-           #breakpoint()
-           if unused_y != None:
-               self.pop_['cp'] = np.zeros(shape=(1, self.num_particles))[0]
-               self.pop_['cm'] = np.zeros(shape=(1, self.num_particles))[0]
+           
 
-           prob = Problem(X.values, unused_y, self.estimator,
+           if unused_y.all() != None:
+               self.pop_['cp'] = np.zeros(shape=(1, self.num_particles))[0]
+               self.pop_['fm'] = np.zeros(shape=(1, self.num_particles))[0]
+
+           prob = Problem(X, unused_y, self.estimator,
                           self.cv, **kargs)
            
            self.N_ = prob.n_cols
@@ -191,11 +196,11 @@ class PSOSelector(object):
                if self.verbose:
                    #breakpoint()
                    interm_var = f'Iteration: {self.iteration_}/{self.max_iter} \n ,'
-                   interm_var = interm_var + f'Best global metric: {self.best_global_[:, -1]} \n , '
-                   if unused_y != None:
+                   interm_var = interm_var + f'Best global metric - CP X PF: {self.best_global_[:, -1]} \n , '
+                   if unused_y.all() != None:
 
                        interm_var = interm_var + f'Best global metric purity: {self.best_global_cp} \n ,'
-                       interm_var = interm_var = f'Best global metric f-measure: {self.best_global_fm} \n ,'     
+                       interm_var = interm_var + f'Best global metric f-measure: {self.best_global_fm} \n ,'     
 
                    interm_var = interm_var + f'Index features_selected: {self.selected_features_} \n , '
                    interm_var = interm_var + f'Number of selected features: {count_sel_feat} \n , ' 
@@ -238,7 +243,6 @@ class PSOSelector(object):
           self.calculate_best_individual(self.pop_)
           self.calculate_best_global()
           self.solution_[self.iteration_, :] = self.best_global_
-          #breakpoint()
           self.update_velocity()
           self.iteration_ += 1
          
@@ -247,17 +251,17 @@ class PSOSelector(object):
          w = self.w
          c1, c2 = self.c1, self.c2
          
-         for i in range(0, len(self.pop_) - 1):
+         for i in range(0, len(self.pop_['pop']) - 1):
              for j in range(0, self.N_):
                  r1= round(uniform(0,1), 2)
                  r2 = round(uniform(0, 1), 2)
-                 pop = self.pop_[i, j]
+                 pop = self.pop_['pop'][i, j]
                  inertia = w * self.velocity_[i,j]
                  cognitive = c1 * r1 * (self.best_individual_[i,j] - pop)
                  social = c2 * r2 * (self.best_global_[0, j] - pop)
                  velocity = inertia + cognitive + social
                  self.velocity_[i,j] = velocity
-                 self.pop_[i,j] += velocity
+                 self.pop_['pop'][i,j] += velocity
                  
        def calculate_best_individual(self, pop):
 
@@ -285,7 +289,6 @@ class PSOSelector(object):
                  continue               
          
              
-             #particle_count = self.count_features(self.pop_[i, :])
              particle_count = self.count_features(self.pop_['pop'][i, :])
              count_best_individual = self.count_features(
                      self.best_individual_[i, :])
